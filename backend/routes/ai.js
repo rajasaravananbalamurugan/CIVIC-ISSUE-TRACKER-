@@ -49,7 +49,7 @@ router.post('/analyze-image', async (req, res) => {
     }
 
     const response = await client.chat.completions.create({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'groq/compound',
       max_tokens: 512,
       messages: [{
         role: 'user',
@@ -111,7 +111,7 @@ router.post('/clean-text', async (req, res) => {
 
   try {
     const response = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'groq/compound',
       max_tokens: 512,
       messages: [{ role: 'user', content: prompt }]
     });
@@ -187,7 +187,7 @@ Consider: public safety risk, number of people affected, days open, upvote count
 
   try {
     const response = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'groq/compound',
       max_tokens: 256,
       messages: [{ role: 'user', content: prompt }],
     });

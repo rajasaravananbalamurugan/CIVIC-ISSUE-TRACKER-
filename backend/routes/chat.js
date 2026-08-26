@@ -81,7 +81,7 @@ YOUR CAPABILITIES & INSTRUCTIONS:
     }));
 
     const response = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'groq/compound',
       max_tokens: 512,
       messages: [
         { role: 'system', content: systemPrompt },
