@@ -1,5 +1,5 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
+const Groq = require('groq-sdk');
 const { query, queryOne } = require('../database/db');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -7,9 +7,9 @@ const router = express.Router();
 router.use(authenticateToken);
 
 function getClient() {
-  const apiKey = process.env.CLAUDE_API_KEY;
-  if (!apiKey || apiKey.startsWith('sk-ant-api03-your-key')) return null;
-  return new Anthropic({ apiKey });
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return null;
+  return new Groq({ apiKey });
 }
 
 // POST /api/chat
@@ -68,7 +68,7 @@ YOUR CAPABILITIES & INSTRUCTIONS:
         fallbackText += `You haven't filed any complaints yet. You can click "File Complaint" in the menu to report an issue!`;
       }
     } else {
-      fallbackText += `I'm here to help with your civic complaints, category SLAs, status updates, and neighbourhood issues. (Note: Add your CLAUDE_API_KEY in backend/.env for live Claude sonnet-4-6 responses!)`;
+      fallbackText += `I'm here to help with your civic complaints, category SLAs, status updates, and neighbourhood issues. (Note: Add your GROQ_API_KEY in backend/.env for live AI responses!)`;
     }
 
     return res.json({ reply: fallbackText });
@@ -80,14 +80,16 @@ YOUR CAPABILITIES & INSTRUCTIONS:
       content: m.content
     }));
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
       max_tokens: 512,
-      system: systemPrompt,
-      messages: formattedMessages
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...formattedMessages
+      ]
     });
 
-    const reply = response.content[0]?.text || 'I apologize, I could not process your request.';
+    const reply = response.choices[0]?.message?.content || 'I apologize, I could not process your request.';
     res.json({ reply });
   } catch (err) {
     console.error('[Chatbot Error]', err.message);

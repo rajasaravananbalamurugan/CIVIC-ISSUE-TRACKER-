@@ -1,18 +1,18 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
+const Groq = require('groq-sdk');
 const { queryOne, run, query, saveDb } = require('../database/db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authenticateToken);
 
-// Initialize Anthropic client (lazy — only fails if key is missing at call time)
+// Initialize Groq client (lazy — only fails if key is missing at call time)
 function getClient() {
-  const apiKey = process.env.CLAUDE_API_KEY;
-  if (!apiKey || apiKey.startsWith('sk-ant-api03-your-key')) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
     return null;
   }
-  return new Anthropic({ apiKey });
+  return new Groq({ apiKey });
 }
 
 // POST /api/ai/analyze-image
@@ -48,30 +48,27 @@ router.post('/analyze-image', async (req, res) => {
       base64Data = parts[1];
     }
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await client.chat.completions.create({
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       max_tokens: 512,
-      system: systemPrompt,
       messages: [{
         role: 'user',
         content: [
           {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: mediaType,
-              data: base64Data
+            type: 'image_url',
+            image_url: {
+              url: `data:${mediaType};base64,${base64Data}`
             }
           },
           {
             type: 'text',
-            text: "Analyze this image and return the JSON object."
+            text: systemPrompt + '\n\nAnalyze this image and return the JSON object.'
           }
         ]
       }]
     });
 
-    const text = response.content[0]?.text?.trim() || '';
+    const text = response.choices[0]?.message?.content?.trim() || '';
     let parsed;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -113,13 +110,13 @@ router.post('/clean-text', async (req, res) => {
   }
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
       max_tokens: 512,
       messages: [{ role: 'user', content: prompt }]
     });
 
-    const cleanedText = response.content[0]?.text?.trim() || text;
+    const cleanedText = response.choices[0]?.message?.content?.trim() || text;
     res.json({ cleanedText });
   } catch (err) {
     console.error('[AI] Clean text error:', err.message);
@@ -151,7 +148,7 @@ router.post('/predict/:complaintId', requireRole('authority', 'admin'), async (r
   if (!client) {
     return res.status(503).json({
       error: 'AI service not configured',
-      message: 'Please set CLAUDE_API_KEY in your backend/.env file',
+      message: 'Please set GROQ_API_KEY in your backend/.env file',
     });
   }
 
@@ -189,15 +186,15 @@ Score guide: 1-25=Low, 26-50=Medium, 51-75=High, 76-100=Critical.
 Consider: public safety risk, number of people affected, days open, upvote count, category SLA, ward history.`;
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
       max_tokens: 256,
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = response.content[0]?.text?.trim() || '';
+    const text = response.choices[0]?.message?.content?.trim() || '';
 
-    // Parse JSON from Claude's response
+    // Parse JSON from Groq's response
     let parsed;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
