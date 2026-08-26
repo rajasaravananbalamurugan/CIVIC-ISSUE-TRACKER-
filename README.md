@@ -211,14 +211,3 @@ JWT_SECRET=your_custom_jwt_secret_here
 - The database is seeded automatically with 3 sample complaints and 4 demo users
 - To reset the database, simply delete `civic_tracker.db` and restart the server
 
----
-
-## 🎓 Academic Context
-
-This project was developed as part of **CS5304 — Java Programming** (adapted for Node.js/React fullstack) at the university level, as presented in the Zeroth Review on 21-06-2026.
-
-**Team:**
-- Rajasaravanan B
-- Sabarish M
-
-**Supervisor:** Mr. Rahul
