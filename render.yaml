@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: civic-tracker-api
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: JWT_SECRET
+        value: civic_tracker_secret_2026
