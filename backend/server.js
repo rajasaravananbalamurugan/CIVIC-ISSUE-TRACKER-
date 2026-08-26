@@ -55,9 +55,9 @@ initializeDatabase().then(() => {
     res.status(500).json({ error: 'Internal server error', message: err.message });
   });
 
-  app.listen(PORT, () => {
-    console.log(`\n🏛️  Civic Tracker API → http://localhost:${PORT}`);
-    console.log(`📊  Health check → http://localhost:${PORT}/api/health\n`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🏛️  Civic Tracker API → http://0.0.0.0:${PORT}`);
+    console.log(`📊  Health check → http://0.0.0.0:${PORT}/api/health\n`);
   });
 }).catch(err => {
   console.error('Failed to initialize database:', err);
