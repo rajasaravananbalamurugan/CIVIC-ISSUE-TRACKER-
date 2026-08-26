@@ -16,7 +16,7 @@ export default function AIChatbot() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: `Hello ${user?.name || 'Citizen'}! 👋 I am CivicBot, your AI assistant powered by Claude. I have access to your filed complaints and category SLAs. How can I help you today?`
+      content: `Hello ${user?.name || 'Citizen'}! 👋 I am CivicBot, your AI assistant powered by Groq. I have access to your filed complaints and category SLAs. How can I help you today?`
     }
   ]);
   const [input, setInput] = useState('');
@@ -46,7 +46,7 @@ export default function AIChatbot() {
       setMessages([...newMessages, { role: 'assistant', content: res.data.reply }]);
     } catch (err) {
       toast.error('Chatbot error: ' + (err.response?.data?.message || err.message));
-      setMessages([...newMessages, { role: 'assistant', content: '⚠️ Sorry, I encountered an issue retrieving an AI response. Please check your CLAUDE_API_KEY in backend/.env.' }]);
+      setMessages([...newMessages, { role: 'assistant', content: '⚠️ Sorry, I encountered an issue retrieving an AI response. Please check your GROQ_API_KEY in backend/.env.' }]);
     } finally {
       setLoading(false);
     }
@@ -69,7 +69,7 @@ export default function AIChatbot() {
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Bot size={24} color="var(--purple)" /> CivicBot AI Assistant
           </h1>
-          <p className="page-subtitle">Ask questions in natural language about your complaints & city services (Claude 3.5)</p>
+          <p className="page-subtitle">Ask questions in natural language about your complaints & city services (Groq · Llama 3.3)</p>
         </div>
 
         <button className="btn btn-secondary btn-sm" onClick={handleClear} title="Reset Conversation">
