@@ -114,11 +114,9 @@ export default function MapPicker({ value, onChange, readOnly = false, height = 
       touchZoom: !readOnly,
     });
 
-    // CartoDB Dark Matter tiles with API key
-    const cartoApiKey = import.meta.env.VITE_CARTO_API_KEY || 'ac_j43782p4';
-    L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${cartoApiKey}`, {
-      attribution: '© OpenStreetMap © CARTO',
-      subdomains: 'abcd',
+    // OpenStreetMap free tile layer (no API key required)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
     }).addTo(map);
 
