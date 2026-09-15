@@ -13,6 +13,9 @@ build/
 backend/.env
 frontend/.env
 *.env.local
+*local.properties
+backend/local.properties
+application-local.properties
 
 # Database & SQLite files
 *.db
