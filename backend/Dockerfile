@@ -6,7 +6,7 @@ COPY gradlew .
 COPY build.gradle settings.gradle ./
 COPY src ./src
 # Build the application
-RUN ./gradlew bootJar --no-daemon
+RUN chmod +x gradlew && ./gradlew bootJar --no-daemon
 
 # Run stage
 FROM eclipse-temurin:25-jre-alpine
