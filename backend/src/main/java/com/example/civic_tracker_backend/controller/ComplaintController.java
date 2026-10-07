@@ -5,9 +5,14 @@ import com.example.civic_tracker_backend.entity.Notification;
 import com.example.civic_tracker_backend.entity.StatusHistory;
 import com.example.civic_tracker_backend.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,6 +26,31 @@ public class ComplaintController {
     @Autowired private StatusHistoryRepository statusHistoryRepository;
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private UserRepository userRepository;
+
+    @Value("${app.upload.dir:uploads}")
+    private String uploadDir;
+
+    private String saveFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) return null;
+        try {
+            Path uploadPath = Paths.get(uploadDir);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
+            String ext = "";
+            String original = file.getOriginalFilename();
+            if (original != null && original.contains(".")) {
+                ext = original.substring(original.lastIndexOf('.'));
+            }
+            String filename = "complaint_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 6) + ext;
+            Path filePath = uploadPath.resolve(filename);
+            Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+            return "/uploads/" + filename;
+        } catch (IOException e) {
+            System.err.println("Failed to save uploaded file: " + e.getMessage());
+            return null;
+        }
+    }
 
     private static final Map<String, Integer> SLA_DAYS = Map.of(
             "Pothole", 7, "Garbage", 3, "Streetlight", 5, "Water Supply", 2
@@ -113,15 +143,23 @@ public class ComplaintController {
         ));
     }
 
-    // ── POST /api/complaints ──────────────────────────────────────────────────
-    @PostMapping
-    public ResponseEntity<?> createComplaint(@RequestBody Complaint complaint, @RequestAttribute("userId") Long userId) {
+    private ResponseEntity<?> processAndSaveComplaint(Complaint complaint, Long userId) {
+        if (complaint.getTitle() == null || complaint.getTitle().trim().isEmpty() ||
+            complaint.getDescription() == null || complaint.getDescription().trim().isEmpty() ||
+            complaint.getCategory() == null || complaint.getCategory().trim().isEmpty() ||
+            complaint.getAddress() == null || complaint.getAddress().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Please fill all required fields (title, description, category, address)."));
+        }
+
         complaint.setCitizenId(userId);
         complaint.setComplaintId("CMP-" + java.time.Year.now().getValue() + "-" + String.format("%04d", complaintRepository.count() + 1));
         complaint.setCreatedAt(LocalDateTime.now());
         complaint.setUpdatedAt(LocalDateTime.now());
         complaint.setStatus("Pending");
         complaint.setSlaDays(getSlaDays(complaint.getCategory()));
+        if (complaint.getPriority() == null || complaint.getPriority().trim().isEmpty()) {
+            complaint.setPriority("Medium");
+        }
         Complaint saved = complaintRepository.save(complaint);
 
         // Create initial status history entry
@@ -141,6 +179,54 @@ public class ComplaintController {
         notificationRepository.save(notif);
 
         return ResponseEntity.status(201).body(Map.of("message", "Complaint filed successfully", "complaint", enrichComplaint(saved)));
+    }
+
+    // ── POST /api/complaints ──────────────────────────────────────────────────
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> createComplaintJson(@RequestBody Complaint complaint, @RequestAttribute("userId") Long userId) {
+        return processAndSaveComplaint(complaint, userId);
+    }
+
+    @PostMapping(consumes = { MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_FORM_URLENCODED_VALUE })
+    public ResponseEntity<?> createComplaintMultipart(
+            @RequestParam("title") String title,
+            @RequestParam("description") String description,
+            @RequestParam("category") String category,
+            @RequestParam(value = "priority", required = false, defaultValue = "Medium") String priority,
+            @RequestParam("address") String address,
+            @RequestParam(value = "ward", required = false) String ward,
+            @RequestParam(value = "latitude", required = false) String latitude,
+            @RequestParam(value = "longitude", required = false) String longitude,
+            @RequestParam(value = "image", required = false) MultipartFile image,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "imageUrl", required = false) String imageUrl,
+            @RequestParam(value = "image_url", required = false) String imageUrlUnderscore,
+            @RequestAttribute("userId") Long userId) {
+
+        Complaint complaint = new Complaint();
+        complaint.setTitle(title);
+        complaint.setDescription(description);
+        complaint.setCategory(category);
+        complaint.setPriority(priority != null && !priority.trim().isEmpty() ? priority : "Medium");
+        complaint.setAddress(address);
+        complaint.setWard(ward);
+        if (latitude != null && !latitude.trim().isEmpty()) {
+            try { complaint.setLatitude(Double.parseDouble(latitude.trim())); } catch (NumberFormatException ignored) {}
+        }
+        if (longitude != null && !longitude.trim().isEmpty()) {
+            try { complaint.setLongitude(Double.parseDouble(longitude.trim())); } catch (NumberFormatException ignored) {}
+        }
+        MultipartFile uploadFile = image != null ? image : file;
+        if (uploadFile != null && !uploadFile.isEmpty()) {
+            String savedUrl = saveFile(uploadFile);
+            if (savedUrl != null) complaint.setImageUrl(savedUrl);
+        } else if (imageUrl != null && !imageUrl.trim().isEmpty()) {
+            complaint.setImageUrl(imageUrl);
+        } else if (imageUrlUnderscore != null && !imageUrlUnderscore.trim().isEmpty()) {
+            complaint.setImageUrl(imageUrlUnderscore);
+        }
+
+        return processAndSaveComplaint(complaint, userId);
     }
 
     // ── GET /api/complaints/stats/summary ─────────────────────────────────────
@@ -275,21 +361,24 @@ public class ComplaintController {
         return ResponseEntity.status(201).body(Map.of("message", "Comment added successfully"));
     }
 
-    // ── PUT /api/complaints/:id/status ────────────────────────────────────────
-    @PutMapping("/{id}/status")
-    public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
+    private ResponseEntity<?> handleUpdateStatus(Long id, String newStatus, String note, String assigned, String priority, String afterImageUrl, Long userId) {
         return complaintRepository.findById(id).map(complaint -> {
-            String newStatus = body.get("status");
-            String note = body.get("note");
-            String assigned = body.get("assigned_to");
             String oldStatus = complaint.getStatus();
-            if (newStatus != null) {
+            if (newStatus != null && !newStatus.trim().isEmpty()) {
                 complaint.setStatus(newStatus);
                 complaint.setUpdatedAt(LocalDateTime.now());
                 if ("Resolved".equals(newStatus)) complaint.setResolvedAt(LocalDateTime.now());
             }
+            if (priority != null && !priority.trim().isEmpty()) {
+                complaint.setPriority(priority);
+            }
             if (note != null) complaint.setResolutionNote(note);
-            if (assigned != null) complaint.setAssignedTo(Long.parseLong(assigned));
+            if (assigned != null && !assigned.trim().isEmpty()) {
+                try { complaint.setAssignedTo(Long.parseLong(assigned)); } catch (NumberFormatException ignored) {}
+            }
+            if (afterImageUrl != null && !afterImageUrl.trim().isEmpty()) {
+                complaint.setAfterImageUrl(afterImageUrl);
+            }
             complaintRepository.save(complaint);
             if (newStatus != null && !newStatus.equals(oldStatus)) {
                 StatusHistory history = new StatusHistory();
@@ -303,6 +392,50 @@ public class ComplaintController {
                 notificationRepository.save(notif);
             }
             return ResponseEntity.ok(Map.of("message", "Complaint updated successfully", "complaint", enrichComplaint(complaint)));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    // ── PUT /api/complaints/:id/status ────────────────────────────────────────
+    @PutMapping(value = "/{id}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> updateStatusJson(@PathVariable Long id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
+        return handleUpdateStatus(id, body.get("status"), body.get("note"), body.get("assigned_to"), body.get("priority"), null, userId);
+    }
+
+    @PutMapping(value = "/{id}/status", consumes = { MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_FORM_URLENCODED_VALUE })
+    public ResponseEntity<?> updateStatusMultipart(
+            @PathVariable Long id,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "note", required = false) String note,
+            @RequestParam(value = "assigned_to", required = false) String assignedTo,
+            @RequestParam(value = "priority", required = false) String priority,
+            @RequestParam(value = "after_image", required = false) MultipartFile afterImage,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "after_image_url", required = false) String afterImageUrl,
+            @RequestAttribute("userId") Long userId) {
+        String savedAfterImageUrl = afterImageUrl;
+        MultipartFile imgFile = afterImage != null ? afterImage : file;
+        if (imgFile != null && !imgFile.isEmpty()) {
+            savedAfterImageUrl = saveFile(imgFile);
+        }
+        return handleUpdateStatus(id, status, note, assignedTo, priority, savedAfterImageUrl, userId);
+    }
+
+    // ── PUT /api/complaints/:id/after-photo ──────────────────────────────────
+    @PutMapping(value = "/{id}/after-photo")
+    public ResponseEntity<?> updateAfterPhoto(
+            @PathVariable Long id,
+            @RequestParam(value = "after_image", required = false) MultipartFile afterImage,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "image", required = false) MultipartFile image) {
+        MultipartFile img = afterImage != null ? afterImage : (file != null ? file : image);
+        if (img == null || img.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No image provided"));
+        }
+        String url = saveFile(img);
+        return complaintRepository.findById(id).map(c -> {
+            c.setAfterImageUrl(url);
+            complaintRepository.save(c);
+            return ResponseEntity.ok(Map.of("message", "After photo updated", "after_image_url", url));
         }).orElse(ResponseEntity.notFound().build());
     }
 

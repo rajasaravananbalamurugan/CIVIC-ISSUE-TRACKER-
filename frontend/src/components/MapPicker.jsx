@@ -58,25 +58,61 @@ export default function MapPicker({ value, onChange, readOnly = false, height = 
   const [geocoding, setGeocoding] = useState(false);
   const [coords, setCoords] = useState(value || null);
 
-  // Reverse geocode via Nominatim
+  // Reverse geocode via Nominatim with BigDataCloud fallback
   const reverseGeocode = useCallback(async (lat, lng) => {
+    if (!onChange) return;
     setGeocoding(true);
+    let resolvedAddress = null;
+    let detectedWard = null;
+
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
         { headers: { 'Accept-Language': 'en' } }
       );
-      const data = await res.json();
-      const address = data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      onChange({ lat, lng, address });
-    } catch {
-      onChange({ lat, lng, address: `${lat.toFixed(5)}, ${lng.toFixed(5)}` });
-    } finally {
-      setGeocoding(false);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.display_name) {
+          resolvedAddress = data.display_name;
+          const match = data.display_name.match(/ward\s*(\d+)/i);
+          if (match && parseInt(match[1]) >= 1 && parseInt(match[1]) <= 8) {
+            detectedWard = `Ward ${match[1]}`;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Nominatim reverse geocode error:', err);
     }
+
+    if (!resolvedAddress) {
+      try {
+        const bdcRes = await fetch(
+          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+        );
+        if (bdcRes.ok) {
+          const bdcData = await bdcRes.json();
+          const parts = [
+            bdcData.locality,
+            bdcData.city,
+            bdcData.principalSubdivision,
+            bdcData.postcode,
+            bdcData.countryName
+          ].filter(Boolean);
+          if (parts.length > 0) {
+            resolvedAddress = parts.join(', ');
+          }
+        }
+      } catch (err) {
+        console.warn('BigDataCloud reverse geocode error:', err);
+      }
+    }
+
+    const finalAddress = resolvedAddress || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    onChange({ lat, lng, address: finalAddress, ward: detectedWard });
+    setGeocoding(false);
   }, [onChange]);
 
-  const placeMarker = useCallback((lat, lng, map) => {
+  const placeMarker = useCallback((lat, lng, map, triggerGeocode = true) => {
     setCoords({ lat, lng });
     if (markerRef.current) {
       markerRef.current.setLatLng([lat, lng]);
@@ -90,12 +126,20 @@ export default function MapPicker({ value, onChange, readOnly = false, height = 
         markerRef.current.on('dragend', (e) => {
           const pos = e.target.getLatLng();
           setCoords({ lat: pos.lat, lng: pos.lng });
+          if (onChange) {
+            onChange({ lat: pos.lat, lng: pos.lng, address: `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}` });
+          }
           reverseGeocode(pos.lat, pos.lng);
         });
       }
     }
-    if (!readOnly) reverseGeocode(lat, lng);
-  }, [readOnly, reverseGeocode]);
+    if (!readOnly && triggerGeocode) {
+      if (onChange) {
+        onChange({ lat, lng, address: `${lat.toFixed(5)}, ${lng.toFixed(5)}` });
+      }
+      reverseGeocode(lat, lng);
+    }
+  }, [readOnly, reverseGeocode, onChange]);
 
   // Initialize map once
   useEffect(() => {
@@ -121,12 +165,12 @@ export default function MapPicker({ value, onChange, readOnly = false, height = 
     }).addTo(map);
 
     if (value) {
-      placeMarker(value.lat, value.lng, map);
+      placeMarker(value.lat, value.lng, map, false);
     }
 
     if (!readOnly) {
       map.on('click', (e) => {
-        placeMarker(e.latlng.lat, e.latlng.lng, map);
+        placeMarker(e.latlng.lat, e.latlng.lng, map, true);
       });
     }
 
@@ -142,9 +186,9 @@ export default function MapPicker({ value, onChange, readOnly = false, height = 
 
   // Sync external value changes (e.g. GPS button outside component)
   useEffect(() => {
-    if (!mapRef.current || !value) return;
-    placeMarker(value.lat, value.lng, mapRef.current);
-    mapRef.current.setView([value.lat, value.lng], 15, { animate: true });
+    if (!mapRef.current || !value || !value.lat || !value.lng) return;
+    placeMarker(value.lat, value.lng, mapRef.current, false);
+    mapRef.current.setView([value.lat, value.lng], Math.max(mapRef.current.getZoom(), 15), { animate: true });
   }, [value?.lat, value?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGPS = () => {

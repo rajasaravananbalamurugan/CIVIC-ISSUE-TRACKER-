@@ -220,33 +220,40 @@ export default function NewComplaint() {
     }));
   };
 
-  const handleMapChange = useCallback(({ lat, lng, address }) => {
+  const handleMapChange = useCallback(({ lat, lng, address, ward }) => {
     setMapPin({ lat, lng });
     setForm(f => ({
       ...f,
       latitude: lat.toFixed(6),
       longitude: lng.toFixed(6),
-      address: f.address || address,
+      address: address || f.address,
+      ward: (ward && !f.ward) ? ward : f.ward,
     }));
   }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!form.title || !form.description || !form.category || !form.address) {
-      setError('Please fill all required fields.');
+    if (!form.title?.trim() || !form.description?.trim() || !form.category?.trim() || !form.address?.trim()) {
+      setError('Please fill all required fields (Title, Category, Description, Address).');
       return;
     }
     setLoading(true);
     try {
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
+      Object.entries(form).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) {
+          fd.append(k, typeof v === 'string' ? v.trim() : v);
+        }
+      });
       if (image) fd.append('image', image);
       const res = await complaintsApi.create(fd);
       toast.success(`Complaint ${res.data.complaint.complaint_id} filed successfully!`);
       navigate(`/complaints/${res.data.complaint.complaint_id}`);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to file complaint.');
+      const msg = err.response?.data?.message || err.response?.data?.error || 'Failed to file complaint.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

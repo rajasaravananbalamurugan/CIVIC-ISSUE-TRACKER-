@@ -34,8 +34,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(404).body(Map.of("error", "Route not found"));
     }
 
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<?> handleMediaTypeNotSupported(org.springframework.web.HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(415).body(Map.of(
+            "error", "Unsupported Media Type",
+            "message", ex.getMessage() != null ? ex.getMessage() : "Unsupported Content-Type"
+        ));
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<?> handleMaxSize(Exception ex) {
+        return ResponseEntity.status(400).body(Map.of(
+            "error", "File too large",
+            "message", "Maximum upload size is 10MB."
+        ));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> handleGeneral(Exception ex) {
-        return ResponseEntity.status(500).body(Map.of("error", "Internal server error", "message", ex.getMessage()));
+        return ResponseEntity.status(500).body(Map.of("error", "Internal server error", "message", ex.getMessage() != null ? ex.getMessage() : "Unexpected error"));
     }
 }
