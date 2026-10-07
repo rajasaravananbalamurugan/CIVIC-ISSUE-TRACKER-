@@ -34,13 +34,25 @@ public class AiController {
 
     private final String GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+    private Optional<Complaint> findComplaint(String idOrComplaintId) {
+        if (idOrComplaintId == null || idOrComplaintId.trim().isEmpty()) return Optional.empty();
+        String trimmed = idOrComplaintId.trim();
+        Optional<Complaint> byRef = complaintRepository.findByComplaintId(trimmed);
+        if (byRef.isPresent()) return byRef;
+        try {
+            return complaintRepository.findById(Long.parseLong(trimmed));
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+    }
+
     @PostMapping("/predict/{complaintId}")
-    public ResponseEntity<?> predictUrgency(@PathVariable Long complaintId) {
-        Optional<Complaint> opt = complaintRepository.findById(complaintId);
+    public ResponseEntity<?> predictUrgency(@PathVariable String complaintId) {
+        Optional<Complaint> opt = findComplaint(complaintId);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         Complaint c = opt.get();
         
-        Optional<AiPrediction> existingOpt = aiPredictionRepository.findByComplaintId(complaintId);
+        Optional<AiPrediction> existingOpt = aiPredictionRepository.findByComplaintId(c.getId());
         if (existingOpt.isPresent()) {
             AiPrediction existing = existingOpt.get();
             // Cache valid for 1 hour
@@ -95,14 +107,14 @@ public class AiController {
     }
 
     @PostMapping("/accept/{complaintId}")
-    public ResponseEntity<?> acceptPrediction(@PathVariable Long complaintId) {
-        Optional<Complaint> opt = complaintRepository.findById(complaintId);
+    public ResponseEntity<?> acceptPrediction(@PathVariable String complaintId) {
+        Optional<Complaint> opt = findComplaint(complaintId);
         if (opt.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "Complaint not found"));
+        Complaint c = opt.get();
         
-        Optional<AiPrediction> predOpt = aiPredictionRepository.findByComplaintId(complaintId);
+        Optional<AiPrediction> predOpt = aiPredictionRepository.findByComplaintId(c.getId());
         if (predOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "No AI prediction found for this complaint"));
         
-        Complaint c = opt.get();
         AiPrediction prediction = predOpt.get();
         
         c.setPriority(prediction.getRecommendedPriority());

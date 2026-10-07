@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { complaintsApi } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { Search, Filter, PlusCircle, ChevronLeft, ChevronRight, MapPin, ThumbsUp, AlertCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const CATEGORIES = ['Pothole','Streetlight','Garbage','Water Supply','Drainage','Road Damage','Encroachment','Noise','Other'];
 const STATUSES = ['Pending','In Progress','Resolved','Rejected'];
@@ -45,6 +46,16 @@ export default function Complaints() {
   const handleFilterChange = (key, val) => {
     setFilters(f => ({ ...f, [key]: val }));
     setPage(1);
+  };
+
+  const handleQuickStatusChange = async (complaintId, newStatus) => {
+    try {
+      await complaintsApi.updateStatus(complaintId, { status: newStatus });
+      setComplaints(prev => prev.map(c => (c.complaint_id === complaintId || c.id === complaintId) ? { ...c, status: newStatus } : c));
+      toast.success(`Complaint status changed to "${newStatus}"`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update status');
+    }
   };
 
   return (
@@ -134,8 +145,32 @@ export default function Complaints() {
                             {c.title}
                           </Link>
                         </td>
-                        <td><span>{CATEGORY_EMOJI[c.category]} {c.category}</span></td>
-                        <td><StatusBadge status={c.status} /></td>
+                        <td>
+                          {user?.role !== 'citizen' ? (
+                            <select
+                              value={c.status}
+                              onChange={(e) => handleQuickStatusChange(c.complaint_id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Click to quickly change status"
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                background: c.status === 'Resolved' ? 'rgba(34,197,94,0.15)' : c.status === 'Pending' ? 'rgba(245,158,11,0.15)' : c.status === 'Rejected' ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)',
+                                color: c.status === 'Resolved' ? '#22c55e' : c.status === 'Pending' ? '#f59e0b' : c.status === 'Rejected' ? '#ef4444' : '#60a5fa',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {STATUSES.map(s => (
+                                <option key={s} value={s} style={{ background: '#0f172a', color: '#fff' }}>{s}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <StatusBadge status={c.status} />
+                          )}
+                        </td>
                         <td><PriorityBadge priority={c.priority} /></td>
                         {user?.role !== 'citizen' && <td style={{ color: 'var(--gray-300)', fontSize: 13 }}>{c.citizen_name}</td>}
                         {/* Upvote count */}

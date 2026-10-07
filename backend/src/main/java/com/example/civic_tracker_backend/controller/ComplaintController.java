@@ -322,17 +322,32 @@ public class ComplaintController {
         return ResponseEntity.ok(result);
     }
 
+    private Optional<Complaint> findComplaint(String idOrComplaintId) {
+        if (idOrComplaintId == null || idOrComplaintId.trim().isEmpty()) {
+            return Optional.empty();
+        }
+        String trimmed = idOrComplaintId.trim();
+        Optional<Complaint> byRef = complaintRepository.findByComplaintId(trimmed);
+        if (byRef.isPresent()) return byRef;
+        try {
+            Long numId = Long.parseLong(trimmed);
+            return complaintRepository.findById(numId);
+        } catch (NumberFormatException ignored) {
+            return Optional.empty();
+        }
+    }
+
     // ── GET /api/complaints/:id ───────────────────────────────────────────────
     @GetMapping("/{id}")
-    public ResponseEntity<?> getComplaint(@PathVariable Long id,
+    public ResponseEntity<?> getComplaint(@PathVariable String id,
                                            @RequestAttribute("userId") Long userId,
                                            @RequestAttribute("userRole") String userRole) {
-        return complaintRepository.findById(id).map(complaint -> {
+        return findComplaint(id).map(complaint -> {
             if ("citizen".equals(userRole) && !userId.equals(complaint.getCitizenId())) {
                 return ResponseEntity.status(403).body((Object) Map.of("error", "Access denied"));
             }
             Map<String, Object> m = enrichComplaint(complaint);
-            List<Map<String, Object>> history = statusHistoryRepository.findByComplaintId(id).stream().map(h -> {
+            List<Map<String, Object>> history = statusHistoryRepository.findByComplaintId(complaint.getId()).stream().map(h -> {
                 Map<String, Object> hm = new LinkedHashMap<>();
                 hm.put("id", h.getId()); hm.put("old_status", h.getOldStatus());
                 hm.put("new_status", h.getNewStatus()); hm.put("note", h.getNote());
@@ -340,7 +355,7 @@ public class ComplaintController {
                 userRepository.findById(h.getChangedBy()).ifPresent(u -> { hm.put("changed_by_name", u.getName()); hm.put("changed_by_role", u.getRole()); });
                 return hm;
             }).collect(Collectors.toList());
-            List<Map<String, Object>> comments = commentRepository.findByComplaintId(id).stream().map(c -> {
+            List<Map<String, Object>> comments = commentRepository.findByComplaintId(complaint.getId()).stream().map(c -> {
                 Map<String, Object> cm = new LinkedHashMap<>();
                 cm.put("id", c.getId()); cm.put("comment", c.getComment()); cm.put("created_at", c.getCreatedAt());
                 userRepository.findById(c.getUserId()).ifPresent(u -> { cm.put("user_name", u.getName()); cm.put("user_role", u.getRole()); });
@@ -352,43 +367,51 @@ public class ComplaintController {
 
     // ── POST /api/complaints/:id/comments ────────────────────────────────────
     @PostMapping("/{id}/comments")
-    public ResponseEntity<?> addComment(@PathVariable Long id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
+    public ResponseEntity<?> addComment(@PathVariable String id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
         String text = body.get("comment");
         if (text == null || text.trim().isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Comment is required"));
-        com.example.civic_tracker_backend.entity.Comment comment = new com.example.civic_tracker_backend.entity.Comment();
-        comment.setComplaintId(id); comment.setUserId(userId); comment.setComment(text);
-        commentRepository.save(comment);
-        return ResponseEntity.status(201).body(Map.of("message", "Comment added successfully"));
+        return findComplaint(id).map(complaint -> {
+            com.example.civic_tracker_backend.entity.Comment comment = new com.example.civic_tracker_backend.entity.Comment();
+            comment.setComplaintId(complaint.getId());
+            comment.setUserId(userId);
+            comment.setComment(text.trim());
+            commentRepository.save(comment);
+            return ResponseEntity.status(201).body((Object) Map.of("message", "Comment added successfully"));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
-    private ResponseEntity<?> handleUpdateStatus(Long id, String newStatus, String note, String assigned, String priority, String afterImageUrl, Long userId) {
-        return complaintRepository.findById(id).map(complaint -> {
+    private ResponseEntity<?> handleUpdateStatus(String id, String newStatus, String note, String assigned, String priority, String afterImageUrl, Long userId) {
+        return findComplaint(id).map(complaint -> {
             String oldStatus = complaint.getStatus();
             if (newStatus != null && !newStatus.trim().isEmpty()) {
-                complaint.setStatus(newStatus);
+                complaint.setStatus(newStatus.trim());
                 complaint.setUpdatedAt(LocalDateTime.now());
-                if ("Resolved".equals(newStatus)) complaint.setResolvedAt(LocalDateTime.now());
+                if ("Resolved".equalsIgnoreCase(newStatus.trim())) complaint.setResolvedAt(LocalDateTime.now());
             }
             if (priority != null && !priority.trim().isEmpty()) {
-                complaint.setPriority(priority);
+                complaint.setPriority(priority.trim());
             }
-            if (note != null) complaint.setResolutionNote(note);
+            if (note != null) complaint.setResolutionNote(note.trim());
             if (assigned != null && !assigned.trim().isEmpty()) {
-                try { complaint.setAssignedTo(Long.parseLong(assigned)); } catch (NumberFormatException ignored) {}
+                try { complaint.setAssignedTo(Long.parseLong(assigned.trim())); } catch (NumberFormatException ignored) {}
             }
             if (afterImageUrl != null && !afterImageUrl.trim().isEmpty()) {
-                complaint.setAfterImageUrl(afterImageUrl);
+                complaint.setAfterImageUrl(afterImageUrl.trim());
             }
             complaintRepository.save(complaint);
-            if (newStatus != null && !newStatus.equals(oldStatus)) {
+            if (newStatus != null && !newStatus.trim().equalsIgnoreCase(oldStatus)) {
                 StatusHistory history = new StatusHistory();
-                history.setComplaintId(id); history.setOldStatus(oldStatus);
-                history.setNewStatus(newStatus); history.setChangedBy(userId); history.setNote(note);
+                history.setComplaintId(complaint.getId());
+                history.setOldStatus(oldStatus);
+                history.setNewStatus(newStatus.trim());
+                history.setChangedBy(userId);
+                history.setNote(note != null ? note.trim() : null);
                 statusHistoryRepository.save(history);
                 Notification notif = new Notification();
-                notif.setUserId(complaint.getCitizenId()); notif.setComplaintId(id);
+                notif.setUserId(complaint.getCitizenId());
+                notif.setComplaintId(complaint.getId());
                 notif.setComplaintRef(complaint.getComplaintId());
-                notif.setMessage("Your complaint " + complaint.getComplaintId() + " status changed to \"" + newStatus + "\".");
+                notif.setMessage("Your complaint " + complaint.getComplaintId() + " status changed to \"" + newStatus.trim() + "\".");
                 notificationRepository.save(notif);
             }
             return ResponseEntity.ok(Map.of("message", "Complaint updated successfully", "complaint", enrichComplaint(complaint)));
@@ -397,13 +420,13 @@ public class ComplaintController {
 
     // ── PUT /api/complaints/:id/status ────────────────────────────────────────
     @PutMapping(value = "/{id}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> updateStatusJson(@PathVariable Long id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
+    public ResponseEntity<?> updateStatusJson(@PathVariable String id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
         return handleUpdateStatus(id, body.get("status"), body.get("note"), body.get("assigned_to"), body.get("priority"), null, userId);
     }
 
     @PutMapping(value = "/{id}/status", consumes = { MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_FORM_URLENCODED_VALUE })
     public ResponseEntity<?> updateStatusMultipart(
-            @PathVariable Long id,
+            @PathVariable String id,
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "note", required = false) String note,
             @RequestParam(value = "assigned_to", required = false) String assignedTo,
@@ -423,7 +446,7 @@ public class ComplaintController {
     // ── PUT /api/complaints/:id/after-photo ──────────────────────────────────
     @PutMapping(value = "/{id}/after-photo")
     public ResponseEntity<?> updateAfterPhoto(
-            @PathVariable Long id,
+            @PathVariable String id,
             @RequestParam(value = "after_image", required = false) MultipartFile afterImage,
             @RequestParam(value = "file", required = false) MultipartFile file,
             @RequestParam(value = "image", required = false) MultipartFile image) {
@@ -432,7 +455,7 @@ public class ComplaintController {
             return ResponseEntity.badRequest().body(Map.of("error", "No image provided"));
         }
         String url = saveFile(img);
-        return complaintRepository.findById(id).map(c -> {
+        return findComplaint(id).map(c -> {
             c.setAfterImageUrl(url);
             complaintRepository.save(c);
             return ResponseEntity.ok(Map.of("message", "After photo updated", "after_image_url", url));
@@ -441,8 +464,8 @@ public class ComplaintController {
 
     // ── POST /api/complaints/:id/upvote ──────────────────────────────────────
     @PostMapping("/{id}/upvote")
-    public ResponseEntity<?> upvote(@PathVariable Long id) {
-        return complaintRepository.findById(id).map(complaint -> {
+    public ResponseEntity<?> upvote(@PathVariable String id) {
+        return findComplaint(id).map(complaint -> {
             int newCount = (complaint.getUpvoteCount() != null ? complaint.getUpvoteCount() : 0) + 1;
             complaint.setUpvoteCount(newCount);
             if (newCount >= 50) complaint.setPriority("Critical");
@@ -456,8 +479,8 @@ public class ComplaintController {
 
     // ── POST /api/complaints/:id/rating ──────────────────────────────────────
     @PostMapping("/{id}/rating")
-    public ResponseEntity<?> submitRating(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        return complaintRepository.findById(id).map(complaint -> {
+    public ResponseEntity<?> submitRating(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        return findComplaint(id).map(complaint -> {
             if (!"Resolved".equals(complaint.getStatus())) {
                 return ResponseEntity.badRequest().body((Object) Map.of("error", "Can only rate resolved complaints"));
             }
@@ -467,11 +490,11 @@ public class ComplaintController {
 
     // ── POST /api/complaints/:id/reopen ──────────────────────────────────────
     @PostMapping("/{id}/reopen")
-    public ResponseEntity<?> reopen(@PathVariable Long id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
+    public ResponseEntity<?> reopen(@PathVariable String id, @RequestBody Map<String, String> body, @RequestAttribute("userId") Long userId) {
         String reason = body.get("reason");
         if (reason == null || reason.trim().isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Reopen reason is required"));
 
-        return complaintRepository.findById(id).map(original -> {
+        return findComplaint(id).map(original -> {
             if (!"Resolved".equals(original.getStatus()))
                 return ResponseEntity.badRequest().body((Object) Map.of("error", "Only resolved complaints can be reopened"));
 

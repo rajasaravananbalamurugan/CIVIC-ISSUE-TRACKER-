@@ -145,15 +145,24 @@ public class AdminController {
     }
 
     @PostMapping("/escalate/{id}")
-    public ResponseEntity<?> escalateComplaint(@PathVariable Long id, @RequestAttribute("userId") Long userId) {
-        return complaintRepository.findById(id).map(complaint -> {
+    public ResponseEntity<?> escalateComplaint(@PathVariable String id, @RequestAttribute("userId") Long userId) {
+        Optional<Complaint> opt = (id != null && !id.trim().isEmpty())
+                ? complaintRepository.findByComplaintId(id.trim())
+                : Optional.empty();
+        if (opt.isEmpty()) {
+            try {
+                opt = complaintRepository.findById(Long.parseLong(id.trim()));
+            } catch (Exception ignored) {}
+        }
+
+        return opt.map(complaint -> {
             complaint.setPriority("Critical");
             complaint.setIsEscalated(1);
             complaint.setUpdatedAt(LocalDateTime.now());
             complaintRepository.save(complaint);
 
             StatusHistory history = new StatusHistory();
-            history.setComplaintId(id);
+            history.setComplaintId(complaint.getId());
             history.setOldStatus(complaint.getStatus());
             history.setNewStatus(complaint.getStatus());
             history.setChangedBy(userId);
@@ -162,7 +171,7 @@ public class AdminController {
 
             Notification notif = new Notification();
             notif.setUserId(complaint.getCitizenId());
-            notif.setComplaintId(id);
+            notif.setComplaintId(complaint.getId());
             notif.setComplaintRef(complaint.getComplaintId());
             notif.setMessage("🚨 ALERT: Your complaint " + complaint.getComplaintId() + " has been escalated to CRITICAL priority.");
             notificationRepository.save(notif);
